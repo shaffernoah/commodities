@@ -20,7 +20,7 @@ A comprehensive dashboard for analyzing commodity prices and cattle slaughter da
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/commodities.git
+git clone https://github.com/shaffernoah/commodities.git
 cd commodities
 ```
 
