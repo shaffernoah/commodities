@@ -10,9 +10,6 @@ import httpx
 # Load environment variables
 load_dotenv()
 
-# Initialize Supabase client
-supabase_url = "https://iqccsqfkxzoptjqhxrht.supabase.co"
-supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxY2NzcWZreHpvcHRqcWhocmh0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDU5NTU1NjgsImV4cCI6MjAyMTUzMTU2OH0.h0AMmUBF2EXXriLEXM5-cCUGhRtDCkR9JtbhkgpWQzA"
 
 def get_supabase() -> Client:
     """Create and return a Supabase client with retry logic"""
