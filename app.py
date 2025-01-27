@@ -1,27 +1,22 @@
+import os
+import pandas as pd
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import pandas as pd
 from datetime import datetime, timedelta
-from supabase import create_client
-import os
 from dotenv import load_dotenv
+from supabase import create_client
+
+# Configure Streamlit page
+st.set_page_config(layout="wide", page_title="USDA Agricultural Data Analysis")
 
 # Load environment variables
 load_dotenv()
 
 # Initialize Supabase client
-SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://qarnlsfwgnjgunsmemea.supabase.co')
+SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://qarnlsfwgnsmemea.supabase.co')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-
-# Configure Streamlit page
-st.set_page_config(
-    page_title="USDA Agricultural Data Analysis",
-    page_icon="🌾",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS
 st.markdown("""
@@ -45,22 +40,16 @@ st.markdown("""
 
 @st.cache_data(ttl=3600)  # Cache data for 1 hour
 def load_cattle_data():
-    """Load cattle data from Supabase"""
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        response = supabase.table('cattle_slaughter').select('*').execute()
-        df = pd.DataFrame(response.data)
+        response = supabase.table('cattle_slaughter').select("*").execute()
         
-        # Convert dates - handle potential missing or invalid dates
-        df['slaughter_date'] = pd.to_datetime(df['slaughter_date'], errors='coerce')
-        
-        # Drop rows where slaughter_date is null
-        df = df.dropna(subset=['slaughter_date'])
-        
-        # Convert volume to numeric, handling percentage values
-        df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
-        
-        return df
+        if response.data:
+            df = pd.DataFrame(response.data)
+            # Convert slaughter_date to datetime
+            df['slaughter_date'] = pd.to_datetime(df['slaughter_date'])
+            return df
+        return None
     except Exception as e:
         st.error(f"Error loading cattle data: {str(e)}")
         return None
@@ -284,142 +273,281 @@ def display_commodity_analysis(df, date_range):
 
 def main():
     st.title("🌾 USDA Agricultural Data Analysis Dashboard")
+    st.markdown("---")
     
     # Create tabs for different data types
-    tab1, tab2 = st.tabs(["Cattle Slaughter Analysis", "Commodity Analysis"])
+    tab1, tab2, tab3 = st.tabs(["Cattle Slaughter Analysis", "Regional Analysis", "Commodity Analysis"])
     
     # Load data
     cattle_df = load_cattle_data()
     commodity_df = load_commodity_data()
+    region_df = None
     
-    # Date range selector in sidebar
-    st.sidebar.header("Filters")
+    # Check if data is loaded
+    if cattle_df is None or cattle_df.empty:
+        st.error("Unable to load cattle data. Please check your database connection.")
+        return
+        
+    # Sidebar filters
+    st.sidebar.header("🔍 Filters")
+    
+    # Species/Class filter - with error handling
+    try:
+        available_classes = ['All'] + sorted([c for c in cattle_df['class'].unique() if c != 'All'])
+    except:
+        available_classes = ['All']
+    selected_class = st.sidebar.selectbox("Select Species/Class", available_classes)
+    
+    # Date range selector
+    st.sidebar.markdown("---")
+    st.sidebar.header("📅 Date Range")
     
     # Get the overall date range from both datasets
-    min_date = min(
-        cattle_df['slaughter_date'].min().date() if cattle_df is not None else datetime.today().date(),
-        commodity_df['date'].min().date() if commodity_df is not None else datetime.today().date()
-    )
-    max_date = max(
-        cattle_df['slaughter_date'].max().date() if cattle_df is not None else datetime.today().date(),
-        commodity_df['date'].max().date() if commodity_df is not None else datetime.today().date()
-    )
+    min_date = datetime.today().date()
+    max_date = datetime.today().date()
     
-    date_range = st.sidebar.date_input(
-        "Select Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
+    if cattle_df is not None and not cattle_df.empty and 'slaughter_date' in cattle_df.columns:
+        min_date = min(min_date, cattle_df['slaughter_date'].min().date())
+        max_date = max(max_date, cattle_df['slaughter_date'].max().date())
+    
+    if commodity_df is not None and not commodity_df.empty and 'date' in commodity_df.columns:
+        min_date = min(min_date, commodity_df['date'].min().date())
+        max_date = max(max_date, commodity_df['date'].max().date())
+    
+    # Add option to show all data
+    use_date_filter = st.sidebar.checkbox("Filter by Date Range", value=False)
+    
+    if use_date_filter:
+        date_range = st.sidebar.date_input(
+            "Select Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date
+        )
+    else:
+        date_range = (min_date, max_date)
     
     with tab1:
         if cattle_df is None or cattle_df.empty:
             st.error("Unable to load cattle data from Supabase. Please check your connection and credentials.")
         else:
-            # Display sample of the cattle data
-            st.write("Sample of the cattle data:")
-            columns_to_show = ['description', 'class', 'slaughter_date', 'volume', 'unit']
-            st.write(cattle_df[columns_to_show].head())
+            st.markdown("### 📊 Cattle Slaughter Metrics")
             
-            # Filter cattle data by date range
-            mask = (cattle_df['slaughter_date'].dt.date >= date_range[0]) & (cattle_df['slaughter_date'].dt.date <= date_range[1])
-            filtered_cattle_df = cattle_df[mask]
+            # Filter cattle data by date range and class
+            filtered_cattle_df = cattle_df.copy()
+            
+            if use_date_filter:
+                start_date = pd.Timestamp(date_range[0])
+                end_date = pd.Timestamp(date_range[1])
+                filtered_cattle_df = filtered_cattle_df[
+                    (filtered_cattle_df['slaughter_date'] >= start_date) & 
+                    (filtered_cattle_df['slaughter_date'] <= end_date)
+                ]
+            
+            # Apply class filter if not 'All'
+            if selected_class != 'All':
+                filtered_cattle_df = filtered_cattle_df[filtered_cattle_df['class'] == selected_class]
             
             # Display cattle metrics
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                total_cattle = filtered_cattle_df[
-                    (filtered_cattle_df['description'] == 'Head Slaughtered') & 
-                    (filtered_cattle_df['class'] == 'All')
-                ]['volume'].sum()
+                head_data = filtered_cattle_df[filtered_cattle_df['description'] == 'Head Slaughtered']
+                if selected_class == 'All':
+                    head_data = head_data[head_data['class'] == 'All']
+                total_cattle = head_data['volume'].sum()
                 st.metric("Total Cattle Slaughtered", f"{total_cattle:,.0f}")
             
             with col2:
-                avg_live_weight = filtered_cattle_df[
-                    (filtered_cattle_df['description'] == 'Live Weight')
-                ]['volume'].mean()
+                weight_data = filtered_cattle_df[
+                    (filtered_cattle_df['description'] == 'Live Weight') &
+                    (filtered_cattle_df['unit'] == 'lbs')
+                ]
+                avg_live_weight = weight_data['volume'].mean()
                 st.metric("Average Live Weight (lbs)", f"{avg_live_weight:,.0f}" if not pd.isna(avg_live_weight) else "N/A")
             
             with col3:
-                avg_dressed_weight = filtered_cattle_df[
-                    (filtered_cattle_df['description'] == 'Dressed Weight')
-                ]['volume'].mean()
+                dressed_data = filtered_cattle_df[
+                    (filtered_cattle_df['description'] == 'Dressed Weight') &
+                    (filtered_cattle_df['unit'] == 'lbs')
+                ]
+                avg_dressed_weight = dressed_data['volume'].mean()
                 st.metric("Average Dressed Weight (lbs)", f"{avg_dressed_weight:,.0f}" if not pd.isna(avg_dressed_weight) else "N/A")
             
             with col4:
-                meat_prod = filtered_cattle_df[
+                meat_data = filtered_cattle_df[
                     (filtered_cattle_df['description'] == 'Meat Production') &
                     (filtered_cattle_df['unit'] == 'Million lbs')
-                ]['volume'].sum()
+                ]
+                meat_prod = meat_data['volume'].sum()
                 st.metric("Total Meat Production (M lbs)", f"{meat_prod:,.1f}" if not pd.isna(meat_prod) else "N/A")
             
+            st.markdown("---")
+            
             # Create subtabs for cattle analysis
-            subtab1, subtab2 = st.tabs(["Daily Trends", "Composition Analysis"])
+            subtab1, subtab2 = st.tabs(["📈 Daily Trends", "📊 Composition Analysis"])
             
             with subtab1:
-                # Daily slaughter trends
-                daily_data = filtered_cattle_df[
-                    (filtered_cattle_df['description'] == 'Head Slaughtered') & 
-                    (filtered_cattle_df['class'].isin(['Steers', 'Heifers', 'Dairy Cows', 'Other Cows']))
-                ].copy()
+                # Daily slaughter trends - keep it simple
+                daily_data = filtered_cattle_df.copy()
+                
+                # Debug info
+                st.write("Initial data sample:")
+                st.write(daily_data[['slaughter_date', 'class', 'volume']].head())
+                
+                if selected_class == 'All':
+                    # When 'All' is selected, show data for 'All' class
+                    daily_data = daily_data[daily_data['class'] == 'All']
+                else:
+                    # When a specific class is selected, only show that class
+                    daily_data = daily_data[daily_data['class'] == selected_class]
+                
+                # Debug info
+                st.write("\nFiltered data sample:")
+                st.write(daily_data[['slaughter_date', 'class', 'volume']].head())
+                st.write(f"Total rows in filtered data: {len(daily_data)}")
                 
                 if not daily_data.empty:
-                    daily_slaughter = daily_data.pivot_table(
-                        index='slaughter_date',
-                        columns='class',
-                        values='volume',
-                        aggfunc='sum'
-                    ).fillna(0)
+                    # Sort by date
+                    daily_data = daily_data.sort_values('slaughter_date')
                     
-                    fig = px.line(daily_slaughter, 
-                                title="Daily Slaughter by Class",
-                                labels={"value": "Head Count", "slaughter_date": "Date"},
-                                height=500)
-                    fig.update_layout(legend_title="Class")
+                    # Create the line chart
+                    fig = px.line(
+                        daily_data,
+                        x='slaughter_date',
+                        y='volume',
+                        title="Daily Slaughter Trends",
+                        labels={
+                            "slaughter_date": "Date",
+                            "volume": "Head Count"
+                        },
+                        height=500
+                    )
+                    
+                    # Update layout
+                    fig.update_layout(
+                        plot_bgcolor='white',
+                        xaxis=dict(
+                            showgrid=True, 
+                            gridwidth=1, 
+                            gridcolor='LightGray',
+                            title="Date",
+                            tickformat="%Y-%m-%d"  # Format date ticks
+                        ),
+                        yaxis=dict(
+                            showgrid=True, 
+                            gridwidth=1, 
+                            gridcolor='LightGray',
+                            title="Head Count",
+                            rangemode='tozero'  # Start y-axis at 0
+                        ),
+                        hovermode='x unified'  # Show all points at same x position
+                    )
+                    
+                    # Display the chart
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.warning("No daily trend data available for the selected date range.")
-            
+                    st.warning("No daily trend data available for the selected filters.")
+
             with subtab2:
-                # Composition analysis
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    class_data = filtered_cattle_df[
-                        (filtered_cattle_df['description'] == 'Head Slaughtered') & 
-                        (filtered_cattle_df['class'].isin(['Steers', 'Heifers', 'Dairy Cows', 'Other Cows']))
-                    ]
+                if selected_class == 'All':
+                    # Composition analysis
+                    col1, col2 = st.columns(2)
                     
-                    if not class_data.empty:
-                        class_total = class_data.groupby('class')['volume'].sum()
+                    with col1:
+                        class_data = filtered_cattle_df[
+                            (filtered_cattle_df['description'] == 'Head Slaughtered') & 
+                            (filtered_cattle_df['class'] != 'All')
+                        ]
                         
-                        fig = px.pie(values=class_total.values, 
-                                   names=class_total.index,
-                                   title="Composition by Class",
-                                   hole=0.4)
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("No composition data available for the selected date range.")
-                
-                with col2:
-                    weight_data = filtered_cattle_df[
-                        (filtered_cattle_df['description'] == 'Live Weight') & 
-                        (filtered_cattle_df['class'].isin(['Steers', 'Heifers', 'Dairy Cows']))
-                    ]
+                        if not class_data.empty:
+                            class_total = class_data.groupby('class')['volume'].sum()
+                            
+                            fig = px.pie(values=class_total.values, 
+                                       names=class_total.index,
+                                       title="Composition by Class",
+                                       hole=0.4)
+                            fig.update_layout(
+                                showlegend=True,
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning("No composition data available for the selected filters.")
                     
-                    if not weight_data.empty:
-                        avg_weights = weight_data.groupby('class')['volume'].mean()
+                    with col2:
+                        weight_data = filtered_cattle_df[
+                            (filtered_cattle_df['description'] == 'Live Weight') & 
+                            (filtered_cattle_df['class'] != 'All') &
+                            (filtered_cattle_df['unit'] == 'lbs')
+                        ]
                         
-                        fig = px.bar(x=avg_weights.index, 
-                                   y=avg_weights.values,
-                                   title="Average Live Weight by Class",
-                                   labels={"x": "Class", "y": "Weight (lbs)"})
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.warning("No weight data available for the selected date range.")
-    
+                        if not weight_data.empty:
+                            avg_weights = weight_data.groupby('class')['volume'].mean()
+                            
+                            fig = px.bar(x=avg_weights.index, 
+                                       y=avg_weights.values,
+                                       title="Average Live Weight by Class",
+                                       labels={"x": "Class", "y": "Weight (lbs)"})
+                            fig.update_layout(
+                                plot_bgcolor='white',
+                                xaxis=dict(showgrid=False),
+                                yaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGray')
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning("No weight data available for the selected filters.")
+                else:
+                    st.info("Composition analysis is only available when viewing all classes. Please select 'All' in the sidebar to view composition charts.")
+
     with tab2:
+        if region_df is None or region_df.empty:
+            st.error("No regional data available")
+        else:
+            st.subheader("Regional Analysis")
+            
+            # Filter regional data by date range
+            if use_date_filter:
+                start_date = pd.Timestamp(date_range[0])
+                end_date = pd.Timestamp(date_range[1])
+                mask = (region_df['slaughter_date'] >= start_date) & (region_df['slaughter_date'] <= end_date)
+                filtered_region_df = region_df[mask]
+            else:
+                filtered_region_df = region_df
+            
+            if not filtered_region_df.empty:
+                # Group by region and calculate total volume
+                region_totals = filtered_region_df.groupby('region')['volume'].sum().sort_values(ascending=True)
+                
+                # Create bar chart
+                fig = px.bar(
+                    x=region_totals.values,
+                    y=region_totals.index,
+                    orientation='h',
+                    title="Total Slaughter by Region",
+                    labels={"x": "Total Volume", "y": "Region"}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Show regional trends over time
+                region_trends = filtered_region_df.pivot_table(
+                    index='slaughter_date',
+                    columns='region',
+                    values='volume',
+                    aggfunc='sum'
+                ).fillna(0)
+                
+                fig = px.line(
+                    region_trends,
+                    title="Regional Trends Over Time",
+                    labels={"value": "Volume", "slaughter_date": "Date"}
+                )
+                fig.update_layout(legend_title="Region")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No regional data available for the selected date range.")
+    
+    with tab3:
         display_commodity_analysis(commodity_df, date_range)
 
 if __name__ == "__main__":
