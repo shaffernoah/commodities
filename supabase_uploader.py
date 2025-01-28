@@ -5,11 +5,16 @@ from dotenv import load_dotenv
 import json
 from datetime import datetime
 import time
-import httpx
 
 # Load environment variables
 load_dotenv()
 
+# Get Supabase credentials
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Missing Supabase credentials. Please check your .env file.")
 
 def get_supabase() -> Client:
     """Create and return a Supabase client with retry logic"""
@@ -18,21 +23,11 @@ def get_supabase() -> Client:
     
     for attempt in range(max_retries):
         try:
-            # Create a custom transport with specific timeouts
-            transport = httpx.HTTPTransport(retries=3)
-            client = httpx.Client(
-                transport=transport,
-                timeout=30.0,  # 30 seconds timeout
-                verify=True,  # Verify SSL certificates
-            )
-            
-            # Create Supabase client with custom HTTP client
-            supabase = create_client(supabase_url, supabase_key, options={
-                'http_client': client
-            })
+            # Create Supabase client
+            supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
             
             # Test the connection
-            supabase.table('commodity_prices').select("*").limit(1).execute()
+            supabase.table('cattle_slaughter').select("*").limit(1).execute()
             return supabase
             
         except Exception as e:
@@ -77,8 +72,11 @@ def transform_cattle_data(df):
     """
     Transform cattle slaughter data into the correct format for the database
     """
-    # Filter for cattle data only
-    df = df[df['commodity'].str.contains('Cattle', na=False)].copy()
+    # Filter for cattle data only (exclude calves/veal)
+    df = df[
+        (df['commodity'].str.contains('Cattle', na=False)) &
+        (~df['commodity'].str.contains('Calves', na=False))
+    ].copy()
     
     # Convert slaughter_date to datetime if it's not already
     df['slaughter_date'] = pd.to_datetime(df['slaughter_date'])
@@ -91,15 +89,36 @@ def transform_cattle_data(df):
         if pd.isna(row['slaughter_date']):
             continue
             
+        # Skip rows that aren't the metrics we want
+        if row['description'] not in ['Head Slaughtered', 'Live Weight', 'Dressed Weight', 'Total Red Meat']:
+            continue
+            
+        # Handle the class field
+        class_name = row['class']
+        if pd.isna(class_name) or class_name == '':
+            class_name = 'All'
+            
         record = {
             'slaughter_date': row['slaughter_date'].strftime('%Y-%m-%d'),
-            'class': row['class'],
+            'class': class_name,
             'description': row['description'],
             'volume': float(row['volume']),
             'unit': row['unit'],
             'created_at': datetime.now().isoformat()
         }
         records.append(record)
+    
+    print(f"Found {len(records)} valid cattle records")
+    if records:
+        # Print some statistics
+        df_records = pd.DataFrame(records)
+        print("\nRecords by description:")
+        print(df_records.groupby('description').size())
+        print("\nRecords by class:")
+        print(df_records.groupby('class').size())
+        print("\nSample record for each description:")
+        for desc in df_records['description'].unique():
+            print(f"\n{desc}:", df_records[df_records['description'] == desc].iloc[0].to_dict())
     
     return records
 
@@ -165,10 +184,12 @@ def main():
         # Initialize Supabase client
         print("Connecting to Supabase...")
         supabase = get_supabase()
+        print("Successfully connected to Supabase!")
         
         # Process cattle data first
         print("\nProcessing cattle data...")
         cattle_df = pd.read_csv('cattle_slaughter_oct16_dec27_2024.csv', parse_dates=['slaughter_date'])
+        print(f"Read {len(cattle_df)} rows from CSV")
         cattle_records = transform_cattle_data(cattle_df)
         
         if cattle_records:
