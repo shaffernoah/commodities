@@ -18,12 +18,10 @@ load_dotenv()
 # Initialize Supabase client
 try:
     st.write("Attempting to access secrets...")
-    # Make sure we're using the REST URL
-    raw_url = st.secrets["SUPABASE_URL"]
-    SUPABASE_URL = raw_url if raw_url.endswith('.supabase.co') else f"{raw_url}.supabase.co"
-    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    SUPABASE_URL = st.secrets["SUPABASE_URL"].strip()  # Remove any whitespace
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"].strip()
     st.write("Successfully loaded secrets!")
-    st.write(f"Debug: Full Supabase URL being used: {SUPABASE_URL}")
+    st.write(f"Debug: Supabase URL: {SUPABASE_URL}")
 except Exception as e:
     st.error(f"Error accessing secrets: {str(e)}")
     st.write("Please make sure secrets are configured in Streamlit Cloud in this format:")
@@ -32,6 +30,14 @@ except Exception as e:
 SUPABASE_URL = "your-url-here"
 SUPABASE_KEY = "your-key-here"
     """)
+
+# Create Supabase client at the module level
+try:
+    st.write("Debug: Creating global Supabase client...")
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    st.write("Debug: Successfully created Supabase client")
+except Exception as e:
+    st.error(f"Error creating Supabase client: {str(e)}")
 
 # Custom CSS
 st.markdown("""
@@ -58,14 +64,15 @@ def load_cattle_data():
     try:
         st.write("Debug: Testing basic HTTP connectivity...")
         try:
-            test_response = requests.get('https://api.supabase.com', timeout=5)
-            st.write(f"Debug: HTTP test successful, status code: {test_response.status_code}")
+            test_url = SUPABASE_URL.replace('https://', 'https://ping.')
+            st.write(f"Debug: Testing connection to: {test_url}")
+            test_response = requests.get(test_url, timeout=5)
+            st.write(f"Debug: HTTP test response: {test_response.status_code}")
         except Exception as http_e:
-            st.write(f"Debug: HTTP test failed: {str(http_e)}")
+            st.write(f"Debug: HTTP test failed: {type(http_e).__name__}: {str(http_e)}")
         
         st.write("Debug: Creating Supabase client...")
         st.write(f"Debug: Using URL: {SUPABASE_URL}")  # Show full URL for debugging
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         
         st.write("Debug: Attempting to query cattle_slaughter table...")
         response = supabase.table('cattle_slaughter').select("*").execute()
@@ -87,7 +94,6 @@ def load_commodity_data():
     """Load commodity data from Supabase"""
     try:
         st.write("Debug: Creating Supabase client for commodities...")
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         
         st.write("Debug: Attempting to query commodities_data table...")
         response = supabase.table('commodities_data').select('*').execute()
