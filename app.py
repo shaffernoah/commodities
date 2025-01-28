@@ -80,6 +80,13 @@ def load_cattle_data():
         if response.data:
             st.write(f"Debug: Successfully retrieved {len(response.data)} records")
             df = pd.DataFrame(response.data)
+            
+            # Debug information about the data
+            st.write("Debug: Cattle data columns:")
+            st.write(df.columns.tolist())
+            st.write("\nDebug: Sample data:")
+            st.write(df.head())
+            
             df['slaughter_date'] = pd.to_datetime(df['slaughter_date'])
             
             # Ensure numeric columns are properly typed
@@ -261,6 +268,14 @@ def display_commodity_analysis(df, date_range):
 def display_cattle_metrics(filtered_df, selected_class):
     """Display cattle metrics and charts"""
     st.markdown("### 📊 Cattle Slaughter Metrics")
+    
+    # Debug information
+    st.write("Debug: Filtered data info:")
+    st.write(filtered_df.info())
+    st.write("\nDebug: Unique descriptions:")
+    st.write(filtered_df['description'].unique())
+    st.write("\nDebug: Unique classes:")
+    st.write(filtered_df['class'].unique())
     
     # Display metrics
     col1, col2, col3, col4 = st.columns(4)
