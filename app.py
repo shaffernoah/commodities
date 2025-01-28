@@ -81,6 +81,13 @@ def load_cattle_data():
             st.write(f"Debug: Successfully retrieved {len(response.data)} records")
             df = pd.DataFrame(response.data)
             df['slaughter_date'] = pd.to_datetime(df['slaughter_date'])
+            
+            # Ensure numeric columns are properly typed
+            numeric_columns = ['total_cattle', 'avg_live_weight', 'avg_dressed_weight', 'total_meat_production']
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
             return df
         st.write("Debug: No data found in the response")
         return None
@@ -98,50 +105,23 @@ def load_commodity_data():
         st.write("Debug: Attempting to query commodities_data table...")
         response = supabase.table('commodities_data').select('*').execute()
         
-        # Initialize df here
-        df = pd.DataFrame()
-        
-        if not response.data:
-            st.write("Debug: No data in Supabase, attempting to load from CSV...")
-            try:
-                df = pd.read_csv('commodity_prices_2024-12-25_to_2025-01-23.csv')
-                
-                # Convert wide format to long format
-                commodity_symbols = ['BEEF', 'FC00', 'GFU22', 'GF', 'LCAT', 'LC00', 'CORN', 'CZ25']
-                
-                # Initialize lists to store transformed data
-                records = []
-                
-                for _, row in df.iterrows():
-                    date = pd.to_datetime(row['date'])
-                    
-                    for symbol in commodity_symbols:
-                        price_col = f'{symbol}_price'
-                        unit_col = f'{symbol}_unit'
-                        
-                        if price_col in row and not pd.isna(row[price_col]):
-                            records.append({
-                                'date': date,
-                                'commodity_symbol': symbol,
-                                'price': float(row[price_col]),
-                                'unit': row[unit_col] if unit_col in row and not pd.isna(row[unit_col]) else None
-                            })
-                
-                df = pd.DataFrame(records)
-            except Exception as csv_e:
-                st.write(f"Debug: Error loading CSV: {str(csv_e)}")
-        else:
+        if response.data:
             st.write(f"Debug: Successfully retrieved {len(response.data)} commodity records")
             df = pd.DataFrame(response.data)
-        
-        if df.empty:
-            st.write("Debug: No data available from either source")
-            return None
             
-        # Print the columns we received
-        st.write("Debug: Commodity data columns:", df.columns.tolist())
-        
-        return df
+            # Convert date column
+            df['date'] = pd.to_datetime(df['date'])
+            
+            # Convert price columns to numeric
+            price_columns = [col for col in df.columns if col.endswith('_price')]
+            for col in price_columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            st.write("Debug: Commodity data columns:", df.columns.tolist())
+            return df
+            
+        st.write("Debug: No data in Supabase")
+        return None
         
     except Exception as e:
         st.error(f"Error loading commodity data: {str(e)}")
@@ -149,150 +129,48 @@ def load_commodity_data():
         return None
 
 def display_commodity_analysis(df, date_range):
-    """Display commodity analysis section"""
     if df is None or df.empty:
-        st.error("No commodity data available")
+        st.warning("No commodity data available for analysis.")
         return
-    
-    # Filter data by date range
-    mask = (df['date'].dt.date >= date_range[0]) & (df['date'].dt.date <= date_range[1])
-    filtered_df = df[mask]
-    
-    # Get unique commodities
-    commodities = sorted(filtered_df['commodity_symbol'].unique())
-    
-    # Commodity selector
-    selected_commodities = st.multiselect(
-        "Select Commodities to Compare",
-        options=commodities,
-        default=commodities[:3] if len(commodities) > 0 else None
-    )
-    
-    if not selected_commodities:
-        st.warning("Please select at least one commodity")
-        return
-    
-    # Filter for selected commodities
-    commodity_data = filtered_df[filtered_df['commodity_symbol'].isin(selected_commodities)]
-    
-    # Display metrics
-    st.subheader("💹 Current Prices")
-    latest_date = commodity_data['date'].max()
-    latest_prices = commodity_data[commodity_data['date'] == latest_date]
-    
-    # Create metric columns dynamically based on number of selected commodities
-    cols = st.columns(min(len(selected_commodities), 4))
-    for i, (_, row) in enumerate(latest_prices.iterrows()):
-        col_idx = i % len(cols)
-        with cols[col_idx]:
-            st.metric(
-                f"{row['commodity_symbol']}",
-                f"{row['price']:.4f} {row['unit'] if pd.notna(row['unit']) else ''}"
-            )
-    
-    # Price trends
-    st.subheader("📈 Price Trends")
-    
-    # Create price trend chart
-    fig = px.line(commodity_data, 
-                  x='date', 
-                  y='price',
-                  color='commodity_symbol',
-                  title="Commodity Price Trends",
-                  labels={"price": "Price", "date": "Date", "commodity_symbol": "Commodity"})
-    
-    # Add units to hover text
-    fig.update_traces(
-        hovertemplate="<b>%{customdata}</b><br>" +
-                      "Date: %{x}<br>" +
-                      "Price: %{y:.4f} %{customdata[1]}<extra></extra>",
-        customdata=commodity_data[['commodity_symbol', 'unit']].values
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Price statistics
-    st.subheader("📊 Price Statistics")
-    
-    # Calculate statistics for each commodity
-    stats_df = commodity_data.groupby('commodity_symbol').agg({
-        'price': ['mean', 'min', 'max', 'std']
-    }).round(4)
-    
-    stats_df.columns = ['Average Price', 'Minimum Price', 'Maximum Price', 'Standard Deviation']
-    stats_df = stats_df.reset_index()
-    
-    # Add units to the display
-    units_dict = dict(zip(commodity_data['commodity_symbol'], commodity_data['unit']))
-    stats_df['Unit'] = stats_df['commodity_symbol'].map(units_dict)
-    
-    # Calculate percent change from first to last date for each commodity
-    price_changes = []
-    for symbol in selected_commodities:
-        symbol_data = commodity_data[commodity_data['commodity_symbol'] == symbol].sort_values('date')
-        if len(symbol_data) >= 2:
-            first_price = symbol_data.iloc[0]['price']
-            last_price = symbol_data.iloc[-1]['price']
-            pct_change = ((last_price - first_price) / first_price) * 100
-            price_changes.append({
-                'commodity_symbol': symbol,
-                'percent_change': pct_change
-            })
-    
-    if price_changes:
-        price_changes_df = pd.DataFrame(price_changes)
-        stats_df = stats_df.merge(price_changes_df, on='commodity_symbol')
-        stats_df = stats_df.rename(columns={'percent_change': 'Price Change %'})
-        stats_df['Price Change %'] = stats_df['Price Change %'].round(2)
-    
-    st.write(stats_df)
-    
-    # Price correlation analysis
-    if len(selected_commodities) > 1:
-        st.subheader("🔄 Price Correlation Analysis")
         
-        # Create pivot table for correlation
-        pivot_df = commodity_data.pivot(index='date', 
-                                      columns='commodity_symbol', 
-                                      values='price')
+    try:
+        # Create a date filter
+        mask = (df['date'] >= date_range[0]) & (df['date'] <= date_range[1])
+        filtered_df = df[mask]
         
-        # Calculate correlation matrix
-        corr_matrix = pivot_df.corr()
-        
-        # Create heatmap
-        fig = px.imshow(corr_matrix,
-                       labels=dict(color="Correlation"),
-                       title="Price Correlation Matrix")
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Add correlation interpretation
-        st.write("#### Correlation Interpretation")
-        st.write("""
-        - Values close to 1 indicate strong positive correlation (prices move together)
-        - Values close to -1 indicate strong negative correlation (prices move in opposite directions)
-        - Values close to 0 indicate little to no correlation
-        """)
-        
-        # Find strongest correlations
-        correlations = []
-        for i in range(len(selected_commodities)):
-            for j in range(i + 1, len(selected_commodities)):
-                corr = corr_matrix.iloc[i, j]
-                correlations.append({
-                    'pair': f"{selected_commodities[i]} - {selected_commodities[j]}",
-                    'correlation': corr
-                })
-        
-        if correlations:
-            correlations_df = pd.DataFrame(correlations)
-            correlations_df = correlations_df.sort_values('correlation', ascending=False)
+        if filtered_df.empty:
+            st.warning("No data available for the selected date range.")
+            return
             
-            st.write("#### Strongest Correlations")
-            for _, row in correlations_df.iterrows():
-                corr = row['correlation']
-                if abs(corr) > 0.5:  # Only show meaningful correlations
-                    st.write(f"- {row['pair']}: {corr:.2f}")
+        # Display metrics for each commodity
+        commodities = [col.replace('_price', '') for col in df.columns if col.endswith('_price')]
+        
+        for commodity in commodities:
+            price_col = f"{commodity}_price"
+            unit_col = f"{commodity}_unit"
+            
+            if price_col in filtered_df.columns:
+                latest_price = filtered_df[price_col].iloc[-1]
+                unit = filtered_df[unit_col].iloc[-1] if unit_col in filtered_df.columns else ''
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        f"{commodity} Latest Price ({unit})",
+                        f"{latest_price:.2f}"
+                    )
+                
+                # Create price trend chart
+                fig = px.line(
+                    filtered_df,
+                    x='date',
+                    y=price_col,
+                    title=f"{commodity} Price Trend"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+    except Exception as e:
+        st.error(f"Error in commodity analysis: {str(e)}")
 
 def main():
     st.title("🌾 USDA Agricultural Data Analysis Dashboard")
