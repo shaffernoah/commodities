@@ -15,8 +15,19 @@ st.set_page_config(layout="wide", page_title="USDA Agricultural Data Analysis")
 load_dotenv()
 
 # Initialize Supabase client
-SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://qarnlsfwgnsmemea.supabase.co')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
+try:
+    st.write("Attempting to access secrets...")
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+    st.write("Successfully loaded secrets!")
+except Exception as e:
+    st.error(f"Error accessing secrets: {str(e)}")
+    st.write("Please make sure secrets are configured in Streamlit Cloud in this format:")
+    st.code("""
+[secrets]
+SUPABASE_URL = "your-url-here"
+SUPABASE_KEY = "your-key-here"
+    """)
 
 # Custom CSS
 st.markdown("""
