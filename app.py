@@ -98,64 +98,52 @@ def load_commodity_data():
         st.write("Debug: Attempting to query commodities_data table...")
         response = supabase.table('commodities_data').select('*').execute()
         
+        # Initialize df here
+        df = pd.DataFrame()
+        
         if not response.data:
             st.write("Debug: No data in Supabase, attempting to load from CSV...")
-            df = pd.read_csv('commodity_prices_2024-12-25_to_2025-01-23.csv')
-            
-            # Convert wide format to long format
-            commodity_symbols = ['BEEF', 'FC00', 'GFU22', 'GF', 'LCAT', 'LC00', 'CORN', 'CZ25']
-            
-            # Initialize lists to store transformed data
-            records = []
-            
-            for _, row in df.iterrows():
-                date = pd.to_datetime(row['date'])
+            try:
+                df = pd.read_csv('commodity_prices_2024-12-25_to_2025-01-23.csv')
                 
-                for symbol in commodity_symbols:
-                    price_col = f'{symbol}_price'
-                    unit_col = f'{symbol}_unit'
+                # Convert wide format to long format
+                commodity_symbols = ['BEEF', 'FC00', 'GFU22', 'GF', 'LCAT', 'LC00', 'CORN', 'CZ25']
+                
+                # Initialize lists to store transformed data
+                records = []
+                
+                for _, row in df.iterrows():
+                    date = pd.to_datetime(row['date'])
                     
-                    if price_col in row and not pd.isna(row[price_col]):
-                        records.append({
-                            'date': date,
-                            'commodity_symbol': symbol,
-                            'price': float(row[price_col]),
-                            'unit': row[unit_col] if unit_col in row and not pd.isna(row[unit_col]) else None
-                        })
-            
-            df = pd.DataFrame(records)
+                    for symbol in commodity_symbols:
+                        price_col = f'{symbol}_price'
+                        unit_col = f'{symbol}_unit'
+                        
+                        if price_col in row and not pd.isna(row[price_col]):
+                            records.append({
+                                'date': date,
+                                'commodity_symbol': symbol,
+                                'price': float(row[price_col]),
+                                'unit': row[unit_col] if unit_col in row and not pd.isna(row[unit_col]) else None
+                            })
+                
+                df = pd.DataFrame(records)
+            except Exception as csv_e:
+                st.write(f"Debug: Error loading CSV: {str(csv_e)}")
+        else:
+            st.write(f"Debug: Successfully retrieved {len(response.data)} commodity records")
+            df = pd.DataFrame(response.data)
         
         if df.empty:
-            print("No data available from either source")
+            st.write("Debug: No data available from either source")
             return None
             
         # Print the columns we received
-        print("Commodity data columns:", df.columns.tolist())
-        
-        # Convert dates if needed
-        if 'date' in df.columns:
-            df['date'] = pd.to_datetime(df['date'])
-        elif 'created_at' in df.columns:
-            df['date'] = pd.to_datetime(df['created_at'])
-            
-        # Ensure we have the required columns
-        required_columns = ['date', 'commodity_symbol', 'price', 'unit']
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            print(f"Missing required columns: {missing_columns}")
-            return None
-        
-        # Convert price to numeric
-        df['price'] = pd.to_numeric(df['price'], errors='coerce')
-        
-        # Drop any rows with missing values
-        df = df.dropna(subset=['date', 'price', 'commodity_symbol'])
+        st.write("Debug: Commodity data columns:", df.columns.tolist())
         
         return df
+        
     except Exception as e:
-        import traceback
-        print(f"Error loading commodity data: {str(e)}")
-        print("Traceback:", traceback.format_exc())
         st.error(f"Error loading commodity data: {str(e)}")
         st.write(f"Debug: Error type: {type(e).__name__}")
         return None
