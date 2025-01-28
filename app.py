@@ -315,20 +315,60 @@ def display_cattle_metrics(filtered_df, selected_class):
         slaughter_data = filtered_df[filtered_df['description'] == 'Head Slaughtered'].copy()
         
         if not slaughter_data.empty:
-            # Create line chart
-            fig = px.line(
-                slaughter_data,
-                x='slaughter_date',
-                y='volume',
-                color='class',
-                title="Daily Slaughter Trends",
-                labels={
-                    "slaughter_date": "Date",
-                    "volume": "Head Count",
-                    "class": "Class"
-                }
+            # Create a pivot table for easier rolling average calculation
+            pivot_data = slaughter_data.pivot(
+                index='slaughter_date',
+                columns='class',
+                values='volume'
+            ).reset_index()
+            
+            # Calculate 7-day rolling average for each class
+            for col in pivot_data.columns:
+                if col != 'slaughter_date':
+                    pivot_data[f'{col}_7day_avg'] = pivot_data[col].rolling(window=7, min_periods=1).mean()
+            
+            # Melt the data back for plotting
+            plot_data = pd.melt(
+                pivot_data,
+                id_vars=['slaughter_date'],
+                value_vars=[col for col in pivot_data.columns if col not in ['slaughter_date']],
+                var_name='series',
+                value_name='volume'
             )
+            
+            # Separate daily and rolling average data
+            daily_data = plot_data[~plot_data['series'].str.contains('_7day_avg')]
+            rolling_data = plot_data[plot_data['series'].str.contains('_7day_avg')]
+            rolling_data['series'] = rolling_data['series'].str.replace('_7day_avg', ' (7-day avg)')
+            
+            # Create figure with both daily values and rolling averages
+            fig = go.Figure()
+            
+            # Add daily values as scatter plots with low opacity
+            for class_name in daily_data['series'].unique():
+                mask = daily_data['series'] == class_name
+                fig.add_trace(go.Scatter(
+                    x=daily_data[mask]['slaughter_date'],
+                    y=daily_data[mask]['volume'],
+                    name=class_name,
+                    mode='markers',
+                    opacity=0.3,
+                    showlegend=False
+                ))
+            
+            # Add rolling averages as solid lines
+            for class_name in rolling_data['series'].unique():
+                mask = rolling_data['series'] == class_name
+                fig.add_trace(go.Scatter(
+                    x=rolling_data[mask]['slaughter_date'],
+                    y=rolling_data[mask]['volume'],
+                    name=class_name,
+                    mode='lines',
+                    line=dict(width=3)
+                ))
+            
             fig.update_layout(
+                title="Daily Slaughter Trends (with 7-day moving average)",
                 plot_bgcolor='white',
                 xaxis=dict(
                     showgrid=True,
@@ -343,7 +383,13 @@ def display_cattle_metrics(filtered_df, selected_class):
                     title="Head Count",
                     rangemode='tozero'
                 ),
-                hovermode='x unified'
+                hovermode='x unified',
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01
+                )
             )
             st.plotly_chart(fig, use_container_width=True)
     
