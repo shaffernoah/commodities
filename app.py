@@ -134,8 +134,12 @@ def display_commodity_analysis(df, date_range):
         return
         
     try:
-        # Create a date filter
-        mask = (df['date'] >= date_range[0]) & (df['date'] <= date_range[1])
+        # Convert date_range to pandas timestamps
+        start_date = pd.Timestamp(date_range[0])
+        end_date = pd.Timestamp(date_range[1])
+        
+        # Create a date filter using datetime objects
+        mask = (df['date'].dt.date >= start_date.date()) & (df['date'].dt.date <= end_date.date())
         filtered_df = df[mask]
         
         if filtered_df.empty:
@@ -145,7 +149,11 @@ def display_commodity_analysis(df, date_range):
         # Display metrics for each commodity
         commodities = [col.replace('_price', '') for col in df.columns if col.endswith('_price')]
         
-        for commodity in commodities:
+        # Create a grid layout for metrics
+        cols = st.columns(len(commodities))
+        
+        # Display latest prices in the grid
+        for idx, commodity in enumerate(commodities):
             price_col = f"{commodity}_price"
             unit_col = f"{commodity}_unit"
             
@@ -153,24 +161,63 @@ def display_commodity_analysis(df, date_range):
                 latest_price = filtered_df[price_col].iloc[-1]
                 unit = filtered_df[unit_col].iloc[-1] if unit_col in filtered_df.columns else ''
                 
-                col1, col2 = st.columns(2)
-                with col1:
+                with cols[idx]:
                     st.metric(
-                        f"{commodity} Latest Price ({unit})",
-                        f"{latest_price:.2f}"
+                        f"{commodity}",
+                        f"${latest_price:.2f}",
+                        f"per {unit}" if unit else ""
                     )
+        
+        st.markdown("---")
+        st.subheader("📈 Price Trends")
+        
+        # Create price trend charts
+        for commodity in commodities:
+            price_col = f"{commodity}_price"
+            unit_col = f"{commodity}_unit"
+            
+            if price_col in filtered_df.columns:
+                unit = filtered_df[unit_col].iloc[-1] if unit_col in filtered_df.columns else ''
                 
-                # Create price trend chart
                 fig = px.line(
                     filtered_df,
                     x='date',
                     y=price_col,
-                    title=f"{commodity} Price Trend"
+                    title=f"{commodity} Price Trend ({unit})",
+                    labels={
+                        "date": "Date",
+                        price_col: f"Price ({unit})"
+                    }
+                )
+                
+                # Update layout for better readability
+                fig.update_layout(
+                    plot_bgcolor='white',
+                    xaxis=dict(
+                        showgrid=True,
+                        gridwidth=1,
+                        gridcolor='LightGray',
+                        tickformat="%Y-%m-%d"
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridwidth=1,
+                        gridcolor='LightGray',
+                        tickprefix="$"
+                    )
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
     except Exception as e:
         st.error(f"Error in commodity analysis: {str(e)}")
+        # Add debug information
+        st.write("Debug Info:")
+        st.write(f"Date range type: {type(date_range)}")
+        st.write(f"Date range values: {date_range}")
+        if 'date' in df.columns:
+            st.write(f"DataFrame date column type: {df['date'].dtype}")
+            st.write("Sample dates from DataFrame:")
+            st.write(df['date'].head())
 
 def main():
     st.title("🌾 USDA Agricultural Data Analysis Dashboard")
@@ -259,34 +306,40 @@ def main():
                 filtered_cattle_df = filtered_cattle_df[filtered_cattle_df['class'] == selected_class]
             
             # Display metrics
-            metrics_df = filtered_cattle_df[filtered_cattle_df['class'] == selected_class]
+            metrics_df = filtered_cattle_df.copy()
             
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                total_cattle = metrics_df[metrics_df['description'] == 'Head Slaughtered']['volume'].sum()
+                total_cattle = metrics_df[
+                    (metrics_df['description'] == 'Head Slaughtered') &
+                    (metrics_df['class'] == selected_class)
+                ]['volume'].sum()
                 st.metric("Total Cattle Slaughtered", f"{total_cattle:,.0f}")
             
             with col2:
                 avg_live = metrics_df[
                     (metrics_df['description'] == 'Live Weight') & 
-                    (metrics_df['unit'] == 'lbs')
+                    (metrics_df['unit'] == 'lbs') &
+                    (metrics_df['class'] == selected_class)
                 ]['volume'].mean()
                 st.metric("Average Live Weight (lbs)", f"{avg_live:,.0f}" if pd.notna(avg_live) else "N/A")
             
             with col3:
                 avg_dressed = metrics_df[
                     (metrics_df['description'] == 'Dressed Weight') & 
-                    (metrics_df['unit'] == 'lbs')
+                    (metrics_df['unit'] == 'lbs') &
+                    (metrics_df['class'] == selected_class)
                 ]['volume'].mean()
                 st.metric("Average Dressed Weight (lbs)", f"{avg_dressed:,.0f}" if pd.notna(avg_dressed) else "N/A")
             
             with col4:
                 total_meat = metrics_df[
                     (metrics_df['description'] == 'Total Red Meat') & 
-                    (metrics_df['unit'] == 'lbs')
-                ]['volume'].sum() / 1_000_000  # Convert to millions of pounds
-                st.metric("Total Meat Production (M lbs)", f"{total_meat:,.1f}")
+                    (metrics_df['unit'] == 'lbs') &
+                    (metrics_df['class'] == selected_class)
+                ]['volume'].sum()
+                st.metric("Total Meat Production (M lbs)", f"{total_meat/1_000_000:,.1f}" if pd.notna(total_meat) else "N/A")
     
     # Process commodity data
     with tab3:
