@@ -269,60 +269,53 @@ def display_cattle_metrics(filtered_df, selected_class):
     """Display cattle metrics and charts"""
     st.markdown("### 📊 Cattle Slaughter Metrics")
     
-    # Debug information
-    st.write("Debug: Filtered data info:")
-    st.write(filtered_df.info())
-    st.write("\nDebug: Unique descriptions:")
-    st.write(filtered_df['description'].unique())
-    st.write("\nDebug: Unique classes:")
-    st.write(filtered_df['class'].unique())
-    
     # Display metrics
     col1, col2, col3, col4 = st.columns(4)
     
+    # Filter for selected class
+    class_data = filtered_df[filtered_df['class'] == selected_class].copy()
+    
     with col1:
-        total_cattle = filtered_df[
-            (filtered_df['description'] == 'Head Slaughtered') &
-            (filtered_df['class'] == selected_class)
-        ]['volume'].sum()
+        head_data = class_data[class_data['description'] == 'Head Slaughtered']
+        total_cattle = head_data['volume'].sum() if not head_data.empty else 0
         st.metric("Total Cattle Slaughtered", f"{total_cattle:,.0f}")
     
     with col2:
-        avg_live = filtered_df[
-            (filtered_df['description'] == 'Live Weight') & 
-            (filtered_df['unit'] == 'lbs') &
-            (filtered_df['class'] == selected_class)
-        ]['volume'].mean()
+        live_data = class_data[
+            (class_data['description'] == 'Live Weight') & 
+            (class_data['unit'] == 'lbs')
+        ]
+        avg_live = live_data['volume'].mean() if not live_data.empty else None
         st.metric("Average Live Weight (lbs)", f"{avg_live:,.0f}" if pd.notna(avg_live) else "N/A")
     
     with col3:
-        avg_dressed = filtered_df[
-            (filtered_df['description'] == 'Dressed Weight') & 
-            (filtered_df['unit'] == 'lbs') &
-            (filtered_df['class'] == selected_class)
-        ]['volume'].mean()
+        dressed_data = class_data[
+            (class_data['description'] == 'Dressed Weight') & 
+            (class_data['unit'] == 'lbs')
+        ]
+        avg_dressed = dressed_data['volume'].mean() if not dressed_data.empty else None
         st.metric("Average Dressed Weight (lbs)", f"{avg_dressed:,.0f}" if pd.notna(avg_dressed) else "N/A")
     
     with col4:
-        total_meat = filtered_df[
-            (filtered_df['description'] == 'Total Red Meat') & 
-            (filtered_df['unit'] == 'lbs') &
-            (filtered_df['class'] == selected_class)
-        ]['volume'].sum()
-        st.metric("Total Meat Production (M lbs)", f"{total_meat/1_000_000:,.1f}" if pd.notna(total_meat) else "N/A")
+        meat_data = class_data[
+            (class_data['description'] == 'Total Red Meat') & 
+            (class_data['unit'] == 'lbs')
+        ]
+        total_meat = meat_data['volume'].sum() if not meat_data.empty else None
+        st.metric(
+            "Total Meat Production (M lbs)", 
+            f"{(total_meat/1_000_000):,.1f}" if pd.notna(total_meat) else "N/A"
+        )
     
     # Create tabs for detailed analysis
     tab1, tab2, tab3 = st.tabs(["📈 Slaughter Trends", "⚖️ Weight Analysis", "🥩 Meat Production"])
     
     with tab1:
         # Daily slaughter trends
-        slaughter_data = filtered_df[
-            (filtered_df['description'] == 'Head Slaughtered')
-        ].copy()
+        slaughter_data = filtered_df[filtered_df['description'] == 'Head Slaughtered'].copy()
         
         if not slaughter_data.empty:
-            slaughter_data = slaughter_data.sort_values('slaughter_date')
-            
+            # Create line chart
             fig = px.line(
                 slaughter_data,
                 x='slaughter_date',
@@ -337,8 +330,19 @@ def display_cattle_metrics(filtered_df, selected_class):
             )
             fig.update_layout(
                 plot_bgcolor='white',
-                xaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGray'),
-                yaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGray'),
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGray',
+                    title="Date"
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGray',
+                    title="Head Count",
+                    rangemode='tozero'
+                ),
                 hovermode='x unified'
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -351,24 +355,36 @@ def display_cattle_metrics(filtered_df, selected_class):
         ].copy()
         
         if not weight_data.empty:
-            weight_data = weight_data.sort_values('slaughter_date')
-            
+            # Create line chart
             fig = px.line(
                 weight_data,
                 x='slaughter_date',
                 y='volume',
                 color='description',
+                line_dash='class',
                 title="Live vs Dressed Weight Trends",
                 labels={
                     "slaughter_date": "Date",
                     "volume": "Weight (lbs)",
-                    "description": "Weight Type"
+                    "description": "Weight Type",
+                    "class": "Class"
                 }
             )
             fig.update_layout(
                 plot_bgcolor='white',
-                xaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGray'),
-                yaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGray'),
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGray',
+                    title="Date"
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGray',
+                    title="Weight (lbs)",
+                    rangemode='tozero'
+                ),
                 hovermode='x unified'
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -381,9 +397,10 @@ def display_cattle_metrics(filtered_df, selected_class):
         ].copy()
         
         if not meat_data.empty:
-            meat_data = meat_data.sort_values('slaughter_date')
-            meat_data['volume'] = meat_data['volume'] / 1_000_000  # Convert to millions
+            # Convert to millions of pounds
+            meat_data['volume'] = meat_data['volume'] / 1_000_000
             
+            # Create line chart
             fig = px.line(
                 meat_data,
                 x='slaughter_date',
@@ -398,8 +415,19 @@ def display_cattle_metrics(filtered_df, selected_class):
             )
             fig.update_layout(
                 plot_bgcolor='white',
-                xaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGray'),
-                yaxis=dict(showgrid=True, gridwidth=1, gridcolor='LightGray'),
+                xaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGray',
+                    title="Date"
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridwidth=1,
+                    gridcolor='LightGray',
+                    title="Production (M lbs)",
+                    rangemode='tozero'
+                ),
                 hovermode='x unified'
             )
             st.plotly_chart(fig, use_container_width=True)
