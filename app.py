@@ -52,31 +52,37 @@ st.markdown("""
 @st.cache_data(ttl=3600)  # Cache data for 1 hour
 def load_cattle_data():
     try:
+        st.write("Debug: Creating Supabase client...")
+        st.write(f"Debug: Using URL: {SUPABASE_URL[:20]}...")  # Only show first part of URL for security
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        
+        st.write("Debug: Attempting to query cattle_slaughter table...")
         response = supabase.table('cattle_slaughter').select("*").execute()
         
         if response.data:
+            st.write(f"Debug: Successfully retrieved {len(response.data)} records")
             df = pd.DataFrame(response.data)
-            # Convert slaughter_date to datetime
             df['slaughter_date'] = pd.to_datetime(df['slaughter_date'])
             return df
+        st.write("Debug: No data found in the response")
         return None
     except Exception as e:
         st.error(f"Error loading cattle data: {str(e)}")
+        st.write(f"Debug: Error type: {type(e).__name__}")
         return None
 
 @st.cache_data(ttl=3600)  # Cache data for 1 hour
 def load_commodity_data():
     """Load commodity data from Supabase"""
     try:
-        # First try loading from Supabase
+        st.write("Debug: Creating Supabase client for commodities...")
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-        response = supabase.table('commodities_data').select('*').execute()
-        df = pd.DataFrame(response.data)
         
-        # If Supabase data is empty, try loading from CSV
-        if df.empty:
-            print("No data in Supabase, loading from CSV...")
+        st.write("Debug: Attempting to query commodities_data table...")
+        response = supabase.table('commodities_data').select('*').execute()
+        
+        if not response.data:
+            st.write("Debug: No data in Supabase, attempting to load from CSV...")
             df = pd.read_csv('commodity_prices_2024-12-25_to_2025-01-23.csv')
             
             # Convert wide format to long format
@@ -134,6 +140,7 @@ def load_commodity_data():
         print(f"Error loading commodity data: {str(e)}")
         print("Traceback:", traceback.format_exc())
         st.error(f"Error loading commodity data: {str(e)}")
+        st.write(f"Debug: Error type: {type(e).__name__}")
         return None
 
 def display_commodity_analysis(df, date_range):
