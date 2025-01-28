@@ -401,22 +401,113 @@ def display_cattle_metrics(filtered_df, selected_class):
         ].copy()
         
         if not weight_data.empty:
-            # Create line chart
-            fig = px.line(
-                weight_data,
-                x='slaughter_date',
-                y='volume',
-                color='description',
-                line_dash='class',
-                title="Live vs Dressed Weight Trends",
-                labels={
-                    "slaughter_date": "Date",
-                    "volume": "Weight (lbs)",
-                    "description": "Weight Type",
-                    "class": "Class"
-                }
+            # Create pivot table for rolling averages
+            pivot_data = weight_data.pivot(
+                index='slaughter_date',
+                columns=['description', 'class'],
+                values='volume'
+            ).reset_index()
+            
+            # Calculate 7-day rolling averages
+            for col in pivot_data.columns:
+                if col != 'slaughter_date':
+                    pivot_data[f'{col}_7day_avg'] = pivot_data[col].rolling(window=7, min_periods=1).mean()
+            
+            # Melt the data back for plotting
+            plot_data = pd.melt(
+                pivot_data,
+                id_vars=['slaughter_date'],
+                value_vars=[col for col in pivot_data.columns if col not in ['slaughter_date']],
+                var_name='series',
+                value_name='volume'
             )
+            
+            # Split the series column into description and class
+            plot_data[['description', 'class', 'rolling']] = plot_data['series'].apply(
+                lambda x: pd.Series([
+                    x[0] if isinstance(x, tuple) else None,  # Description
+                    x[1] if isinstance(x, tuple) else None,  # Class
+                    '_7day_avg' in str(x)  # Rolling average flag
+                ])
+            )
+            
+            # Create figure
+            fig = go.Figure()
+            
+            # Plot daily values and rolling averages for each weight type and class
+            for desc in ['Live Weight', 'Dressed Weight']:
+                for class_name in weight_data['class'].unique():
+                    # Daily values as scatter
+                    daily_mask = (
+                        (plot_data['description'] == desc) &
+                        (plot_data['class'] == class_name) &
+                        (~plot_data['rolling'])
+                    )
+                    if daily_mask.any():
+                        fig.add_trace(go.Scatter(
+                            x=plot_data[daily_mask]['slaughter_date'],
+                            y=plot_data[daily_mask]['volume'],
+                            name=f"{desc} - {class_name}",
+                            mode='markers',
+                            opacity=0.3,
+                            showlegend=False,
+                            marker=dict(
+                                symbol='circle' if desc == 'Live Weight' else 'square'
+                            )
+                        ))
+                    
+                    # Rolling average as line
+                    rolling_mask = (
+                        (plot_data['description'] == desc) &
+                        (plot_data['class'] == class_name) &
+                        (plot_data['rolling'])
+                    )
+                    if rolling_mask.any():
+                        fig.add_trace(go.Scatter(
+                            x=plot_data[rolling_mask]['slaughter_date'],
+                            y=plot_data[rolling_mask]['volume'],
+                            name=f"{desc} - {class_name} (7-day avg)",
+                            mode='lines',
+                            line=dict(
+                                width=3,
+                                dash='solid' if desc == 'Live Weight' else 'dash'
+                            )
+                        ))
+            
+            # Calculate and display dressing percentage
+            st.markdown("### 📊 Dressing Percentage Analysis")
+            
+            # Get the latest weight data
+            latest_date = weight_data['slaughter_date'].max()
+            latest_weights = weight_data[weight_data['slaughter_date'] == latest_date]
+            
+            # Calculate dressing percentages for each class
+            col1, col2, col3 = st.columns(3)
+            
+            for i, class_name in enumerate(['All', 'Steers', 'Heifers']):
+                live = latest_weights[
+                    (latest_weights['description'] == 'Live Weight') &
+                    (latest_weights['class'] == class_name)
+                ]['volume'].iloc[0] if len(latest_weights) > 0 else None
+                
+                dressed = latest_weights[
+                    (latest_weights['description'] == 'Dressed Weight') &
+                    (latest_weights['class'] == class_name)
+                ]['volume'].iloc[0] if len(latest_weights) > 0 else None
+                
+                if live and dressed:
+                    dressing_pct = (dressed / live) * 100
+                    col = [col1, col2, col3][i]
+                    with col:
+                        st.metric(
+                            f"Dressing % ({class_name})",
+                            f"{dressing_pct:.1f}%",
+                            help=f"Live: {live:,.0f} lbs\nDressed: {dressed:,.0f} lbs"
+                        )
+            
+            # Update layout
             fig.update_layout(
+                title="Weight Trends by Class (with 7-day moving average)",
                 plot_bgcolor='white',
                 xaxis=dict(
                     showgrid=True,
@@ -431,7 +522,13 @@ def display_cattle_metrics(filtered_df, selected_class):
                     title="Weight (lbs)",
                     rangemode='tozero'
                 ),
-                hovermode='x unified'
+                hovermode='x unified',
+                legend=dict(
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=0.01
+                )
             )
             st.plotly_chart(fig, use_container_width=True)
     
