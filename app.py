@@ -7,6 +7,7 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
+import requests  # Add this at the top with other imports
 
 # Configure Streamlit page
 st.set_page_config(layout="wide", page_title="USDA Agricultural Data Analysis")
@@ -17,9 +18,12 @@ load_dotenv()
 # Initialize Supabase client
 try:
     st.write("Attempting to access secrets...")
-    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    # Make sure we're using the REST URL
+    raw_url = st.secrets["SUPABASE_URL"]
+    SUPABASE_URL = raw_url if raw_url.endswith('.supabase.co') else f"{raw_url}.supabase.co"
     SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
     st.write("Successfully loaded secrets!")
+    st.write(f"Debug: Full Supabase URL being used: {SUPABASE_URL}")
 except Exception as e:
     st.error(f"Error accessing secrets: {str(e)}")
     st.write("Please make sure secrets are configured in Streamlit Cloud in this format:")
@@ -52,8 +56,15 @@ st.markdown("""
 @st.cache_data(ttl=3600)  # Cache data for 1 hour
 def load_cattle_data():
     try:
+        st.write("Debug: Testing basic HTTP connectivity...")
+        try:
+            test_response = requests.get('https://api.supabase.com', timeout=5)
+            st.write(f"Debug: HTTP test successful, status code: {test_response.status_code}")
+        except Exception as http_e:
+            st.write(f"Debug: HTTP test failed: {str(http_e)}")
+        
         st.write("Debug: Creating Supabase client...")
-        st.write(f"Debug: Using URL: {SUPABASE_URL[:20]}...")  # Only show first part of URL for security
+        st.write(f"Debug: Using URL: {SUPABASE_URL}")  # Show full URL for debugging
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         
         st.write("Debug: Attempting to query cattle_slaughter table...")
