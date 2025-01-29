@@ -403,81 +403,55 @@ def display_cattle_metrics(filtered_df, selected_class):
         if not weight_data.empty:
             st.markdown("### 📊 Weight Analysis")
             
-            # Create pivot table for rolling averages
-            pivot_data = weight_data.pivot(
-                index='slaughter_date',
-                columns=['description', 'class'],
-                values='volume'
-            ).reset_index()
+            # Create separate series for each weight type and class
+            weight_series = {}
+            for desc in ['Live Weight', 'Dressed Weight']:
+                for class_name in weight_data['class'].unique():
+                    mask = (weight_data['description'] == desc) & (weight_data['class'] == class_name)
+                    if mask.any():
+                        series_data = weight_data[mask].set_index('date')['volume']
+                        series_data.index = pd.to_datetime(series_data.index)
+                        series_data = series_data.sort_index()
+                        key = f"{desc} - {class_name}"
+                        weight_series[key] = series_data
+                        # Calculate 7-day rolling average
+                        if len(series_data) > 1:
+                            weight_series[f"{key} (7-day avg)"] = series_data.rolling(window=7, min_periods=1).mean()
             
-            # Only calculate rolling averages if we have numeric data
-            numeric_cols = pivot_data.select_dtypes(include=['float64', 'int64']).columns
-            if len(numeric_cols) > 0:
-                # Calculate 7-day rolling averages for numeric columns only
-                for col in numeric_cols:
-                    pivot_data[f'{col}_7day_avg'] = pivot_data[col].rolling(window=7, min_periods=1).mean()
-                
-                # Melt the data back for plotting
-                plot_data = pd.melt(
-                    pivot_data,
-                    id_vars=['slaughter_date'],
-                    value_vars=[col for col in pivot_data.columns if col not in ['slaughter_date']],
-                    var_name='series',
-                    value_name='volume'
-                )
-                
-                # Split the series column into description and class
-                plot_data[['description', 'class', 'rolling']] = plot_data['series'].apply(
-                    lambda x: pd.Series([
-                        x[0] if isinstance(x, tuple) else None,  # Description
-                        x[1] if isinstance(x, tuple) else None,  # Class
-                        '_7day_avg' in str(x)  # Rolling average flag
-                    ])
-                )
-                
+            if weight_series:
                 # Create figure
                 fig = go.Figure()
                 
-                # Plot daily values and rolling averages for each weight type and class
-                for desc in ['Live Weight', 'Dressed Weight']:
-                    for class_name in weight_data['class'].unique():
-                        # Daily values as scatter
-                        daily_mask = (
-                            (plot_data['description'] == desc) &
-                            (plot_data['class'] == class_name) &
-                            (~plot_data['rolling'])
-                        )
-                        if daily_mask.any():
-                            fig.add_trace(go.Scatter(
-                                x=plot_data[daily_mask]['slaughter_date'],
-                                y=plot_data[daily_mask]['volume'],
-                                name=f"{desc} - {class_name}",
-                                mode='markers',
-                                opacity=0.3,
-                                showlegend=True,
-                                marker=dict(
-                                    symbol='circle' if desc == 'Live Weight' else 'square',
-                                    size=8
-                                )
-                            ))
-                        
-                        # Rolling average as line
-                        rolling_mask = (
-                            (plot_data['description'] == desc) &
-                            (plot_data['class'] == class_name) &
-                            (plot_data['rolling'])
-                        )
-                        if rolling_mask.any():
-                            fig.add_trace(go.Scatter(
-                                x=plot_data[rolling_mask]['slaughter_date'],
-                                y=plot_data[rolling_mask]['volume'],
-                                name=f"{desc} - {class_name} (7-day avg)",
-                                mode='lines',
-                                line=dict(
-                                    width=3,
-                                    dash='solid' if desc == 'Live Weight' else 'dash'
-                                )
-                            ))
+                # Plot each series
+                for name, series in weight_series.items():
+                    is_rolling = '(7-day avg)' in name
+                    is_live = 'Live Weight' in name
+                    
+                    if is_rolling:
+                        # Line plot for rolling averages
+                        fig.add_trace(go.Scatter(
+                            x=series.index,
+                            y=series.values,
+                            name=name,
+                            mode='lines',
+                            line=dict(
+                                width=3,
+                                dash='solid' if is_live else 'dash'
+                            )
+                        ))
+                    else:
+                        # Scatter plot for daily values
+                        fig.add_trace(go.Scatter(
+                            x=series.index,
+                            y=series.values,
+                            name=name,
+                            mode='markers',
+                            opacity=0.3,
+                            marker=dict(
+                                symbol='circle' if is_live else 'square',
+                                size=8
+                            )
+                        ))
                 
                 # Update layout
                 fig.update_layout(
@@ -510,9 +484,9 @@ def display_cattle_metrics(filtered_df, selected_class):
                 # Calculate and display dressing percentage
                 st.markdown("### 🔄 Dressing Percentage")
                 
-                # Get the latest weight data
-                latest_date = weight_data['slaughter_date'].max()
-                latest_weights = weight_data[weight_data['slaughter_date'] == latest_date]
+                # Get the latest weight data for each class
+                latest_date = weight_data['date'].max()
+                latest_weights = weight_data[weight_data['date'] == latest_date]
                 
                 # Calculate dressing percentages for each class
                 col1, col2, col3 = st.columns(3)
@@ -562,12 +536,12 @@ def display_cattle_metrics(filtered_df, selected_class):
             # Create line chart
             fig = px.line(
                 meat_data,
-                x='slaughter_date',
+                x='date',
                 y='volume',
                 color='class',
                 title="Daily Meat Production by Class",
                 labels={
-                    "slaughter_date": "Date",
+                    "date": "Date",
                     "volume": "Production (M lbs)",
                     "class": "Class"
                 }
@@ -610,9 +584,9 @@ def main():
     
     # Update date range based on available data
     if cattle_df is not None and not cattle_df.empty:
-        if 'slaughter_date' in cattle_df.columns:
-            cattle_min = cattle_df['slaughter_date'].min().date()
-            cattle_max = cattle_df['slaughter_date'].max().date()
+        if 'date' in cattle_df.columns:
+            cattle_min = cattle_df['date'].min().date()
+            cattle_max = cattle_df['date'].max().date()
             min_date = min(min_date, cattle_min)
             max_date = max(max_date, cattle_max)
     
@@ -667,8 +641,8 @@ def main():
             
             # Apply date filter
             filtered_cattle_df = filtered_cattle_df[
-                (filtered_cattle_df['slaughter_date'].dt.date >= start_date) & 
-                (filtered_cattle_df['slaughter_date'].dt.date <= end_date)
+                (filtered_cattle_df['date'].dt.date >= start_date) & 
+                (filtered_cattle_df['date'].dt.date <= end_date)
             ]
             
             # Display metrics and charts
