@@ -72,34 +72,52 @@ def transform_cattle_data(df):
     """
     Transform cattle slaughter data into the correct format for the database
     """
+    print("\nInitial data shape:", df.shape)
+    print("\nUnique descriptions:", df['description'].unique())
+    
     # Filter for cattle data only (exclude calves/veal)
     df = df[
         (df['commodity'].str.contains('Cattle', na=False)) &
         (~df['commodity'].str.contains('Calves', na=False))
     ].copy()
     
-    # Convert slaughter_date to datetime if it's not already
-    df['slaughter_date'] = pd.to_datetime(df['slaughter_date'])
+    print("\nAfter cattle filter shape:", df.shape)
+    print("\nUnique descriptions after cattle filter:", df['description'].unique())
+    
+    # Filter for relevant descriptions first
+    df = df[df['description'].isin(['Head Slaughtered', 'Live Weight', 'Dressed Weight', 'Total Red Meat'])]
+    
+    print("\nAfter description filter - records by description:")
+    print(df.groupby('description').size())
+    
+    # Handle dates based on description type
+    df['date'] = df.apply(
+        lambda row: (
+            pd.to_datetime(row['report_date'], format='%m/%d/%Y') 
+            if row['description'] in ['Live Weight', 'Dressed Weight'] 
+            else pd.to_datetime(row['slaughter_date'], format='%m/%d/%y', errors='coerce')
+        ),
+        axis=1
+    )
+    
+    # Filter for valid dates
+    df = df[df['date'].notna()]
+    
+    print("\nAfter date filter - records by description:")
+    print(df.groupby('description').size())
     
     # Create records list
     records = []
     
     # Process each row
     for _, row in df.iterrows():
-        if pd.isna(row['slaughter_date']):
-            continue
-            
-        # Skip rows that aren't the metrics we want
-        if row['description'] not in ['Head Slaughtered', 'Live Weight', 'Dressed Weight', 'Total Red Meat']:
-            continue
-            
         # Handle the class field
         class_name = row['class']
         if pd.isna(class_name) or class_name == '':
             class_name = 'All'
             
         record = {
-            'slaughter_date': row['slaughter_date'].strftime('%Y-%m-%d'),
+            'slaughter_date': row['date'].strftime('%Y-%m-%d'),
             'class': class_name,
             'description': row['description'],
             'volume': float(row['volume']),
@@ -108,7 +126,7 @@ def transform_cattle_data(df):
         }
         records.append(record)
     
-    print(f"Found {len(records)} valid cattle records")
+    print(f"\nFound {len(records)} valid cattle records")
     if records:
         # Print some statistics
         df_records = pd.DataFrame(records)
@@ -116,9 +134,20 @@ def transform_cattle_data(df):
         print(df_records.groupby('description').size())
         print("\nRecords by class:")
         print(df_records.groupby('class').size())
-        print("\nSample record for each description:")
+        print("\nSample records for each description:")
         for desc in df_records['description'].unique():
-            print(f"\n{desc}:", df_records[df_records['description'] == desc].iloc[0].to_dict())
+            sample = df_records[df_records['description'] == desc].iloc[0].to_dict()
+            print(f"\n{desc}:", sample)
+            
+        # Print some examples of each type
+        print("\nSample rows from original data:")
+        for desc in ['Head Slaughtered', 'Live Weight', 'Dressed Weight', 'Total Red Meat']:
+            sample = df[df['description'] == desc]
+            if not sample.empty:
+                print(f"\n{desc}:")
+                print(sample[['description', 'class', 'date', 'volume', 'unit']].head(1))
+                print("Original date fields:")
+                print(sample[['report_date', 'slaughter_date']].head(1))
     
     return records
 
@@ -180,39 +209,33 @@ def upload_cattle_data(records, supabase):
                 retry_delay *= 2  # Exponential backoff
 
 def main():
-    try:
-        # Initialize Supabase client
-        print("Connecting to Supabase...")
-        supabase = get_supabase()
-        print("Successfully connected to Supabase!")
-        
-        # Process cattle data first
-        print("\nProcessing cattle data...")
-        cattle_df = pd.read_csv('cattle_slaughter_oct16_dec27_2024.csv', parse_dates=['slaughter_date'])
-        print(f"Read {len(cattle_df)} rows from CSV")
-        cattle_records = transform_cattle_data(cattle_df)
-        
-        if cattle_records:
-            print(f"Uploading {len(cattle_records)} cattle records to Supabase...")
-            upload_cattle_data(cattle_records, supabase)
-        else:
-            print("No valid cattle records found to upload")
-        
-        # Process commodity data
-        print("\nProcessing commodity data...")
-        commodity_df = pd.read_csv('commodity_prices_2024-12-25_to_2025-01-23.csv', parse_dates=['date'])
-        commodity_records = transform_commodity_data(commodity_df)
-        
-        if commodity_records:
-            print(f"Uploading {len(commodity_records)} commodity records to Supabase...")
-            upload_to_supabase(commodity_records, supabase)
-        else:
-            print("No valid commodity records found to upload")
-        
-        print("All uploads completed!")
-        
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    """
+    Main function to upload data to Supabase
+    """
+    print("Connecting to Supabase...")
+    supabase = get_supabase()
+    print("Successfully connected to Supabase!")
+    
+    print("\nProcessing cattle data...")
+    # Read cattle data without parsing dates
+    cattle_df = pd.read_csv('cattle_slaughter_oct16_dec27_2024.csv')
+    print(f"Read {len(cattle_df)} rows from CSV")
+    
+    # Transform and upload cattle data
+    cattle_records = transform_cattle_data(cattle_df)
+    if cattle_records:
+        print(f"Uploading {len(cattle_records)} cattle records to Supabase...")
+        upload_cattle_data(cattle_records, supabase)
+    
+    print("\nProcessing commodity data...")
+    # Read commodity data
+    commodity_df = pd.read_csv('commodity_prices_2024-12-25_to_2025-01-23.csv', parse_dates=['date'])
+    commodity_records = transform_commodity_data(commodity_df)
+    if commodity_records:
+        print(f"Uploading {len(commodity_records)} commodity records to Supabase...")
+        upload_to_supabase(commodity_records, supabase)
+    
+    print("All uploads completed!")
 
 if __name__ == "__main__":
     main()

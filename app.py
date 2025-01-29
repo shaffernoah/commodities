@@ -401,6 +401,8 @@ def display_cattle_metrics(filtered_df, selected_class):
         ].copy()
         
         if not weight_data.empty:
+            st.markdown("### 📊 Weight Analysis")
+            
             # Create pivot table for rolling averages
             pivot_data = weight_data.pivot(
                 index='slaughter_date',
@@ -450,9 +452,10 @@ def display_cattle_metrics(filtered_df, selected_class):
                             name=f"{desc} - {class_name}",
                             mode='markers',
                             opacity=0.3,
-                            showlegend=False,
+                            showlegend=True,
                             marker=dict(
-                                symbol='circle' if desc == 'Live Weight' else 'square'
+                                symbol='circle' if desc == 'Live Weight' else 'square',
+                                size=8
                             )
                         ))
                     
@@ -475,7 +478,7 @@ def display_cattle_metrics(filtered_df, selected_class):
                         ))
             
             # Calculate and display dressing percentage
-            st.markdown("### 📊 Dressing Percentage Analysis")
+            st.markdown("### 🔄 Dressing Percentage")
             
             # Get the latest weight data
             latest_date = weight_data['slaughter_date'].max()
@@ -484,7 +487,7 @@ def display_cattle_metrics(filtered_df, selected_class):
             # Calculate dressing percentages for each class
             col1, col2, col3 = st.columns(3)
             
-            for i, class_name in enumerate(['All', 'Steers', 'Heifers']):
+            for i, class_name in enumerate(['Cattle', 'Steers', 'Heifers']):
                 live = latest_weights[
                     (latest_weights['description'] == 'Live Weight') &
                     (latest_weights['class'] == class_name)
@@ -507,7 +510,7 @@ def display_cattle_metrics(filtered_df, selected_class):
             
             # Update layout
             fig.update_layout(
-                title="Weight Trends by Class (with 7-day moving average)",
+                title="Live vs Dressed Weight by Class (with 7-day moving average)",
                 plot_bgcolor='white',
                 xaxis=dict(
                     showgrid=True,
@@ -527,7 +530,8 @@ def display_cattle_metrics(filtered_df, selected_class):
                     yanchor="top",
                     y=0.99,
                     xanchor="left",
-                    x=0.01
+                    x=0.01,
+                    bgcolor='rgba(255,255,255,0.8)'
                 )
             )
             st.plotly_chart(fig, use_container_width=True)
