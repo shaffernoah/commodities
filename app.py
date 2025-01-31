@@ -265,305 +265,61 @@ def display_commodity_analysis(df, date_range):
             st.write("Sample dates from DataFrame:")
             st.write(df['date'].head())
 
-def display_cattle_metrics(filtered_df, selected_class):
-    """Display cattle metrics and charts"""
-    st.markdown("### 📊 Cattle Slaughter Metrics")
-    
-    # Display metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    # Filter for selected class
-    class_data = filtered_df[filtered_df['class'] == selected_class].copy()
-    
-    with col1:
-        head_data = class_data[class_data['description'] == 'Head Slaughtered']
-        total_cattle = head_data['volume'].sum() if not head_data.empty else 0
-        st.metric("Total Cattle Slaughtered", f"{total_cattle:,.0f}")
-    
-    with col2:
-        live_data = class_data[
-            (class_data['description'] == 'Live Weight') & 
-            (class_data['unit'] == 'lbs')
-        ]
-        avg_live = live_data['volume'].mean() if not live_data.empty else None
-        st.metric("Average Live Weight (lbs)", f"{avg_live:,.0f}" if pd.notna(avg_live) else "N/A")
-    
-    with col3:
-        dressed_data = class_data[
-            (class_data['description'] == 'Dressed Weight') & 
-            (class_data['unit'] == 'lbs')
-        ]
-        avg_dressed = dressed_data['volume'].mean() if not dressed_data.empty else None
-        st.metric("Average Dressed Weight (lbs)", f"{avg_dressed:,.0f}" if pd.notna(avg_dressed) else "N/A")
-    
-    with col4:
-        meat_data = class_data[
-            (class_data['description'] == 'Total Red Meat') & 
-            (class_data['unit'] == 'lbs')
-        ]
-        total_meat = meat_data['volume'].sum() if not meat_data.empty else None
-        st.metric(
-            "Total Meat Production (M lbs)", 
-            f"{(total_meat/1_000_000):,.1f}" if pd.notna(total_meat) else "N/A"
-        )
-    
-    # Create tabs for detailed analysis
-    tab1, tab2, tab3 = st.tabs(["📈 Slaughter Trends", "⚖️ Weight Analysis", "🥩 Meat Production"])
-    
-    with tab1:
-        # Daily slaughter trends
-        slaughter_data = filtered_df[filtered_df['description'] == 'Head Slaughtered'].copy()
-        
-        if not slaughter_data.empty:
-            # Create a pivot table for easier rolling average calculation
-            pivot_data = slaughter_data.pivot(
-                index='slaughter_date',
-                columns='class',
-                values='volume'
-            ).reset_index()
-            
-            # Calculate 7-day rolling average for each class
-            for col in pivot_data.columns:
-                if col != 'slaughter_date':
-                    pivot_data[f'{col}_7day_avg'] = pivot_data[col].rolling(window=7, min_periods=1).mean()
-            
-            # Melt the data back for plotting
-            plot_data = pd.melt(
-                pivot_data,
-                id_vars=['slaughter_date'],
-                value_vars=[col for col in pivot_data.columns if col not in ['slaughter_date']],
-                var_name='series',
-                value_name='volume'
-            )
-            
-            # Separate daily and rolling average data
-            daily_data = plot_data[~plot_data['series'].str.contains('_7day_avg')]
-            rolling_data = plot_data[plot_data['series'].str.contains('_7day_avg')]
-            rolling_data['series'] = rolling_data['series'].str.replace('_7day_avg', ' (7-day avg)')
-            
-            # Create figure with both daily values and rolling averages
-            fig = go.Figure()
-            
-            # Add daily values as scatter plots with low opacity
-            for class_name in daily_data['series'].unique():
-                mask = daily_data['series'] == class_name
-                fig.add_trace(go.Scatter(
-                    x=daily_data[mask]['slaughter_date'],
-                    y=daily_data[mask]['volume'],
-                    name=class_name,
-                    mode='markers',
-                    opacity=0.3,
-                    showlegend=False
-                ))
-            
-            # Add rolling averages as solid lines
-            for class_name in rolling_data['series'].unique():
-                mask = rolling_data['series'] == class_name
-                fig.add_trace(go.Scatter(
-                    x=rolling_data[mask]['slaughter_date'],
-                    y=rolling_data[mask]['volume'],
-                    name=class_name,
-                    mode='lines',
-                    line=dict(width=3)
-                ))
-            
-            fig.update_layout(
-                title="Daily Slaughter Trends (with 7-day moving average)",
-                plot_bgcolor='white',
-                xaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='LightGray',
-                    title="Date"
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='LightGray',
-                    title="Head Count",
-                    rangemode='tozero'
-                ),
-                hovermode='x unified',
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=0.01
-                )
-            )
-            st.plotly_chart(fig, use_container_width=True)
-    
-    with tab2:
-        # Weight comparison
-        weight_data = filtered_df[
-            (filtered_df['description'].isin(['Live Weight', 'Dressed Weight'])) &
-            (filtered_df['unit'] == 'lbs')
-        ].copy()
-        
-        if not weight_data.empty:
-            st.markdown("### 📊 Weight Analysis")
-            
-            # Create separate series for each weight type and class
-            weight_series = {}
-            for desc in ['Live Weight', 'Dressed Weight']:
-                for class_name in weight_data['class'].unique():
-                    mask = (weight_data['description'] == desc) & (weight_data['class'] == class_name)
-                    if mask.any():
-                        series_data = weight_data[mask].set_index('date')['volume']
-                        series_data.index = pd.to_datetime(series_data.index)
-                        series_data = series_data.sort_index()
-                        key = f"{desc} - {class_name}"
-                        weight_series[key] = series_data
-                        # Calculate 7-day rolling average
-                        if len(series_data) > 1:
-                            weight_series[f"{key} (7-day avg)"] = series_data.rolling(window=7, min_periods=1).mean()
-            
-            if weight_series:
-                # Create figure
-                fig = go.Figure()
-                
-                # Plot each series
-                for name, series in weight_series.items():
-                    is_rolling = '(7-day avg)' in name
-                    is_live = 'Live Weight' in name
-                    
-                    if is_rolling:
-                        # Line plot for rolling averages
-                        fig.add_trace(go.Scatter(
-                            x=series.index,
-                            y=series.values,
-                            name=name,
-                            mode='lines',
-                            line=dict(
-                                width=3,
-                                dash='solid' if is_live else 'dash'
-                            )
-                        ))
-                    else:
-                        # Scatter plot for daily values
-                        fig.add_trace(go.Scatter(
-                            x=series.index,
-                            y=series.values,
-                            name=name,
-                            mode='markers',
-                            opacity=0.3,
-                            marker=dict(
-                                symbol='circle' if is_live else 'square',
-                                size=8
-                            )
-                        ))
-                
-                # Update layout
-                fig.update_layout(
-                    title="Live vs Dressed Weight by Class (with 7-day moving average)",
-                    plot_bgcolor='white',
-                    xaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='LightGray',
-                        title="Date"
-                    ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridwidth=1,
-                        gridcolor='LightGray',
-                        title="Weight (lbs)",
-                        rangemode='tozero'
-                    ),
-                    hovermode='x unified',
-                    legend=dict(
-                        yanchor="top",
-                        y=0.99,
-                        xanchor="left",
-                        x=0.01,
-                        bgcolor='rgba(255,255,255,0.8)'
-                    )
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Calculate and display dressing percentage
-                st.markdown("### 🔄 Dressing Percentage")
-                
-                # Get the latest weight data for each class
-                latest_date = weight_data['date'].max()
-                latest_weights = weight_data[weight_data['date'] == latest_date]
-                
-                # Calculate dressing percentages for each class
-                col1, col2, col3 = st.columns(3)
-                
-                for i, class_name in enumerate(['Cattle', 'Steers', 'Heifers']):
-                    class_weights = latest_weights[latest_weights['class'] == class_name]
-                    
-                    live = class_weights[
-                        class_weights['description'] == 'Live Weight'
-                    ]['volume'].iloc[0] if len(class_weights) > 0 and 'Live Weight' in class_weights['description'].values else None
-                    
-                    dressed = class_weights[
-                        class_weights['description'] == 'Dressed Weight'
-                    ]['volume'].iloc[0] if len(class_weights) > 0 and 'Dressed Weight' in class_weights['description'].values else None
-                    
-                    col = [col1, col2, col3][i]
-                    with col:
-                        if live is not None and dressed is not None:
-                            dressing_pct = (dressed / live) * 100
-                            st.metric(
-                                f"Dressing % ({class_name})",
-                                f"{dressing_pct:.1f}%",
-                                help=f"Live: {live:,.0f} lbs\nDressed: {dressed:,.0f} lbs"
-                            )
-                        else:
-                            st.metric(
-                                f"Dressing % ({class_name})",
-                                "N/A",
-                                help="Insufficient data"
-                            )
-            else:
-                st.warning("No weight data available for the selected filters.")
-        else:
-            st.warning("No weight data available for the selected filters.")
-    
-    with tab3:
-        # Meat production trends
-        meat_data = filtered_df[
-            (filtered_df['description'] == 'Total Red Meat') &
-            (filtered_df['unit'] == 'lbs')
-        ].copy()
-        
-        if not meat_data.empty:
-            # Convert to millions of pounds
-            meat_data['volume'] = meat_data['volume'] / 1_000_000
-            
-            # Create line chart
-            fig = px.line(
-                meat_data,
-                x='date',
-                y='volume',
-                color='class',
-                title="Daily Meat Production by Class",
-                labels={
-                    "date": "Date",
-                    "volume": "Production (M lbs)",
-                    "class": "Class"
-                }
-            )
-            fig.update_layout(
-                plot_bgcolor='white',
-                xaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='LightGray',
-                    title="Date"
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridwidth=1,
-                    gridcolor='LightGray',
-                    title="Production (M lbs)",
-                    rangemode='tozero'
-                ),
-                hovermode='x unified'
-            )
-            st.plotly_chart(fig, use_container_width=True)
+def display_cattle_metrics(df, selected_class):
+    """Display metrics and charts for cattle data."""
+    if df.empty:
+        st.warning("No data available for the selected date range and class.")
+        return
+
+    # Filter for weight-related records
+    weight_data = df[
+        (df['description'].str.contains('Weight', case=False, na=False)) &
+        (df['volume'].notna())
+    ].copy()
+
+    if weight_data.empty:
+        st.warning("No weight data available for the selected criteria.")
+        return
+
+    # Create pivot table with dates as index and weight types as columns
+    pivot_data = weight_data.pivot_table(
+        index='slaughter_date',
+        columns='description',
+        values='volume',
+        aggfunc='mean'
+    ).reset_index()
+
+    # Ensure pivot_data has data
+    if pivot_data.empty or len(pivot_data.columns) < 2:
+        st.warning("Insufficient data to calculate metrics.")
+        return
+
+    # Calculate rolling averages for numeric columns only
+    numeric_cols = pivot_data.select_dtypes(include=['float64', 'int64']).columns
+    for col in numeric_cols:
+        pivot_data[f'{col}_7day_avg'] = pivot_data[col].rolling(window=7, min_periods=1).mean()
+
+    # Prepare data for plotting
+    plot_data = pd.melt(
+        pivot_data,
+        id_vars=['slaughter_date'],
+        value_vars=[col for col in pivot_data.columns if col != 'slaughter_date']
+    )
+
+    # Clean up series names for display
+    plot_data['series'] = plot_data['variable'].str.replace('_7day_avg', ' (7-day avg)')
+
+    # Create the plot
+    fig = px.line(
+        plot_data,
+        x='slaughter_date',
+        y='value',
+        color='series',
+        title=f'Cattle Weights Over Time - {selected_class}',
+        labels={'value': 'Weight', 'slaughter_date': 'Date'}
+    )
+
+    st.plotly_chart(fig)
 
 def main():
     st.title("🌾 USDA Agricultural Data Analysis Dashboard")
@@ -641,8 +397,8 @@ def main():
             
             # Apply date filter
             filtered_cattle_df = filtered_cattle_df[
-                (filtered_cattle_df['date'].dt.date >= start_date) & 
-                (filtered_cattle_df['date'].dt.date <= end_date)
+                (filtered_cattle_df['slaughter_date'].dt.date >= start_date) &
+                (filtered_cattle_df['slaughter_date'].dt.date <= end_date)
             ]
             
             # Display metrics and charts

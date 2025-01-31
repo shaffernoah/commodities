@@ -76,6 +76,8 @@ def process_csv_data(df):
             
             # Clean all columns to ensure JSON serializable
             for column in df_subset.columns:
+                if column in date_columns or pd.api.types.is_datetime64_any_dtype(df_subset[column]):
+                    continue
                 df_subset[column] = df_subset[column].apply(clean_data_for_json)
             
             dfs[name] = df_subset

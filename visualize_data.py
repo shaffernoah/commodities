@@ -7,14 +7,25 @@ from datetime import datetime
 sns.set_theme(style="whitegrid")
 sns.set_palette("husl")
 
+def clean_dataframe(df):
+    df.columns = df.columns.str.strip().str.lower()
+    for col in df.select_dtypes(include='object').columns:
+        df[col] = df[col].str.strip()
+    return df
+
 def load_and_prepare_data():
     # Load the most recent data files
     daily_slaughter = pd.read_csv('cattle_daily_slaughter_20250123_221454.csv')
     full_data = pd.read_csv('federal_inspection_slaughter_20250123_221454.csv')
-    
-    # Convert slaughter_date to datetime
-    daily_slaughter['slaughter_date'] = pd.to_datetime(daily_slaughter['slaughter_date'], format='%m/%d/%y')
-    
+
+    # Clean dataframes
+    daily_slaughter = clean_dataframe(daily_slaughter)
+    full_data = clean_dataframe(full_data)
+
+    # Convert slaughter_date to datetime with error coercion
+    if 'slaughter_date' in daily_slaughter.columns:
+        daily_slaughter['slaughter_date'] = pd.to_datetime(daily_slaughter['slaughter_date'], format='%m/%d/%y', errors='coerce')
+
     return daily_slaughter, full_data
 
 def plot_daily_slaughter(daily_slaughter):
